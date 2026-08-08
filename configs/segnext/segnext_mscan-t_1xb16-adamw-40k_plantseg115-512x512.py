@@ -38,7 +38,7 @@ model = dict(
         channels=256,
         ham_channels=256,
         dropout_ratio=0.1,
-        num_classes=115,
+        num_classes=116,
         norm_cfg=ham_norm_cfg,
         align_corners=False,
         loss_decode=dict(
@@ -77,7 +77,7 @@ param_scheduler = [
         type='PolyLR',
         power=1.0,
         begin=1500,
-        end=160000,
+        end=40000,
         eta_min=0.0,
         by_epoch=False,
     )

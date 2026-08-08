@@ -3,10 +3,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.ops import sigmoid_focal_loss as _sigmoid_focal_loss
 
 from mmseg.registry import MODELS
 from .utils import weight_reduce_loss
+
+try:
+    from mmcv.ops import sigmoid_focal_loss as _sigmoid_focal_loss
+except ModuleNotFoundError:
+    _sigmoid_focal_loss = None
 
 
 # This method is used when cuda is not available
@@ -100,6 +104,11 @@ def sigmoid_focal_loss(pred,
         avg_factor (int, optional): Average factor that is used to average
             the loss. Defaults to None.
     """
+    if _sigmoid_focal_loss is None:
+        return py_sigmoid_focal_loss(pred, one_hot_target, None, weight, gamma,
+                                     alpha, class_weight, valid_mask,
+                                     reduction, avg_factor)
+
     # Function.apply does not accept keyword arguments, so the decorator
     # "weighted_loss" is not applicable
     final_weight = torch.ones(1, pred.size(1)).type_as(pred)

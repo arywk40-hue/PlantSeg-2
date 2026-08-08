@@ -2,12 +2,12 @@
 from typing import List, Tuple
 
 import torch
-from mmcv.ops import point_sample
 from mmengine.structures import InstanceData
 from torch import Tensor
 
 from mmseg.registry import TASK_UTILS
 from mmseg.utils import ConfigType, SampleList
+from mmseg.models.utils import point_sample
 
 
 def seg_data_to_instance_data(ignore_index: int,

@@ -1,7 +1,27 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import torch
-from mmcv.ops import point_sample
+import torch.nn.functional as F
 from torch import Tensor
+
+
+def point_sample(input: Tensor, point_coords: Tensor, **kwargs) -> Tensor:
+    """CPU-friendly fallback for mmcv.ops.point_sample.
+
+    mmcv-lite does not ship compiled ops. For semantic segmentation configs
+    that only import this module at registry time, a small grid_sample wrapper
+    is enough to avoid requiring mmcv._ext.
+    """
+    add_dim = False
+    if point_coords.dim() == 3:
+        add_dim = True
+        point_coords = point_coords.unsqueeze(2)
+    output = F.grid_sample(
+        input,
+        2.0 * point_coords - 1.0,
+        align_corners=kwargs.get('align_corners', False))
+    if add_dim:
+        output = output.squeeze(3)
+    return output
 
 
 def get_uncertainty(mask_preds: Tensor, labels: Tensor) -> Tensor:

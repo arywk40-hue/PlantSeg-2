@@ -20,8 +20,14 @@ from .typing_utils import (ConfigType, ForwardResults, MultiConfig,
                            OptConfigType, OptMultiConfig, OptSampleList,
                            SampleList, TensorDict, TensorList)
 
-# isort: off
-from .mask_classification import MatchMasks, seg_data_to_instance_data
+def __getattr__(name):
+    if name in ('MatchMasks', 'seg_data_to_instance_data'):
+        from .mask_classification import MatchMasks, seg_data_to_instance_data
+        return {
+            'MatchMasks': MatchMasks,
+            'seg_data_to_instance_data': seg_data_to_instance_data,
+        }[name]
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
 
 __all__ = [
     'collect_env',

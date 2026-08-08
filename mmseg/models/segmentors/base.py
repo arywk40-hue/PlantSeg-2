@@ -174,22 +174,41 @@ class BaseSegmentor(BaseModel, metaclass=ABCMeta):
                     else:
                         i_seg_logits = i_seg_logits.flip(dims=(2, ))
 
-                # resize as original shape
-                i_seg_logits = resize(
-                    i_seg_logits,
-                    size=img_meta['ori_shape'],
-                    mode='bilinear',
-                    align_corners=self.align_corners,
-                    warning=False).squeeze(0)
+                # Collapse channels before upsampling to ori_shape to avoid
+                # allocating a ~C × H × W float32 buffer (e.g. 116ch × 4032×
+                # 3024 ≈ 5 GiB).  argmax/sigmoid produces a 1-channel tensor
+                # that is then cheaply upsampled with nearest-neighbour.
+                if C > 1:
+                    i_seg_pred = i_seg_logits.argmax(
+                        dim=1, keepdim=True).float()  # (1,1,h,w)
+                    i_seg_pred = resize(
+                        i_seg_pred,
+                        size=img_meta['ori_shape'],
+                        mode='nearest',
+                        align_corners=None,
+                        warning=False).squeeze(0).long()  # (1,H,W)
+                    # Keep a down-scaled copy of logits for metrics that need
+                    # them; we do NOT upsample all 116 channels to ori_shape.
+                    i_seg_logits = i_seg_logits.squeeze(0)  # (C,h,w)
+                else:
+                    i_seg_logits = resize(
+                        i_seg_logits,
+                        size=img_meta['ori_shape'],
+                        mode='bilinear',
+                        align_corners=self.align_corners,
+                        warning=False).squeeze(0)
+                    i_seg_logits = i_seg_logits.sigmoid()
+                    i_seg_pred = (i_seg_logits >
+                                  self.decode_head.threshold).to(i_seg_logits)
             else:
                 i_seg_logits = seg_logits[i]
+                if C > 1:
+                    i_seg_pred = i_seg_logits.argmax(dim=0, keepdim=True)
+                else:
+                    i_seg_logits = i_seg_logits.sigmoid()
+                    i_seg_pred = (i_seg_logits >
+                                  self.decode_head.threshold).to(i_seg_logits)
 
-            if C > 1:
-                i_seg_pred = i_seg_logits.argmax(dim=0, keepdim=True)
-            else:
-                i_seg_logits = i_seg_logits.sigmoid()
-                i_seg_pred = (i_seg_logits >
-                              self.decode_head.threshold).to(i_seg_logits)
             data_samples[i].set_data({
                 'seg_logits':
                 PixelData(**{'data': i_seg_logits}),

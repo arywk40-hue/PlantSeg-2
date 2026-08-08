@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from mmcv.cnn import ConvModule, build_norm_layer
 from mmcv.cnn.bricks.transformer import BaseTransformerLayer
-from mmcv.ops import point_sample
 from mmengine.dist import all_reduce
 from mmengine.model.weight_init import (caffe2_xavier_init, normal_init,
                                         trunc_normal_)
@@ -20,7 +19,8 @@ from mmseg.registry import MODELS
 from mmseg.utils import (ConfigType, MatchMasks, SampleList,
                          seg_data_to_instance_data)
 from ..utils import (MLP, LayerNorm2d, PatchEmbed, cross_attn_layer,
-                     get_uncertain_point_coords_with_randomness, resize)
+                     get_uncertain_point_coords_with_randomness, point_sample,
+                     resize)
 from .decode_head import BaseDecodeHead
 
 
