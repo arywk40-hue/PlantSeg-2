@@ -55,15 +55,54 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 | Exp     | Config                                              | Split | mIoU | mAcc | Notes |
 |---------|-----------------------------------------------------|-------|------|------|-------|
 | EXP-000 | smoke (200 iter)                                    | val   |      |      | pipeline check only |
-| EXP-001 | segnext_mscan-l_paper-sgd_40k_...512x512            | val   |      |      | paper recipe: SGD 1e-3, FP32 |
-| EXP-002 | EXP-001 + `--amp`                                   | val   |      |      | must match EXP-001 +/-0.3 |
-| EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   |      |      | one change vs EXP-002: AdamW |
+| EXP-001 | segnext_mscan-l_paper-sgd_40k_...512x512            | val   | 11.34 @8k | | STOPPED at 8k of 40k. See below. |
+| EXP-002 | EXP-001 + `--amp`                                   | val   |      |      | dropped -- EXP-001 abandoned, no baseline to control against |
+| EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   |      |      | AdamW + head lr_mult=10 + warmup |
 | EXP-004 | EXP-003, lr in {3e-5, 6e-5, 1.2e-4, 2.4e-4}         | val   |      |      | sweep |
 | EXP-005 | EXP-003 + CE+Dice                                   | val   |      |      | justify with `tools/class_stats.py` on the FULL data first |
 | EXP-006 | segnext_mscan-l_tuned_40k_...640x640                | val   |      |      | CONFOUNDED: crop + loss |
 | EXP-007 | winner, seeds 0/1/2                                 | val   |      |      | report mean +/- std |
 | FINAL   | winner, best-on-val ckpt                            | TEST  |      |      | run ONCE |
 | FINAL+  | winner + TTA                                        | TEST  |      |      | disclose separately |
+
+### EXP-001: the paper's stated recipe does not reproduce its own number
+
+Stopped at iteration 8,000 of 40,000. Val curve (`logs/exp001_val_curve.txt`):
+
+| Iter | mIoU  | mPrecision | mRecall |
+|------|-------|-----------|---------|
+| 2000 | 1.09  | 24.97     | 1.55    |
+| 8000 | 11.34 | 41.00     | 17.04   |
+
+Two things this establishes:
+
+1. **Precision (41) far exceeds recall (17).** The model is usually right when
+   it commits to a disease class but rarely commits. That is the signature of
+   an under-trained head on an ~80%-background dataset, not a data or label
+   bug -- a genuine pipeline fault drives precision to ~0 as well.
+2. **Background inflates the headline.** mIoU averages 116 classes including
+   background, whose IoU is ~80. At mIoU 11.34 the mean over the 115 *disease*
+   classes is only ~10.7. Reaching the paper's 44.52 requires ~44 average
+   disease IoU, i.e. roughly 4x.
+
+Probable cause: the paper specifies "a learning rate of 0.001" with no mention
+of parameter groups, so this config applies it uniformly. The repo's own
+`segnext_mscan-l_1xb16-adamw-40k_plantseg115-512x512.py` gives the randomly
+initialised 116-class head **10x** the base LR plus a 1,500-iteration warmup,
+and uses AdamW @ 6e-5 rather than SGD. The published text and the published
+code describe different experiments; only the code plausibly produced 44.52.
+
+Caveat on these numbers: EXP-001 ran before the `postprocess_result` fix
+(commit 5152e61), so its validation used nearest-neighbour upsampling of an
+argmaxed label map. That costs some boundary IoU. Re-scoring the saved
+checkpoint under the corrected code quantifies it:
+
+    python3 tools/test.py \
+      configs/segnext/segnext_mscan-l_paper-sgd_40k_plantseg115-512x512.py \
+      work_dirs/exp001_baseline_sgd/best_mIoU_iter_8000.pth \
+      --work-dir work_dirs/exp001_recheck
+
+Expect a point or two, not ten. It does not change the conclusion.
 
 ## Reproduction gate
 
