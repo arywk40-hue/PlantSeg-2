@@ -12,6 +12,16 @@ from mmseg.utils import SampleList
 @MODELS.register_module()
 class SegTTAModel(BaseTTAModel):
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # merge_preds averages seg_logits across scales and flips, so every
+        # augmented view has to come back at the original image resolution.
+        # BaseSegmentor.postprocess_result otherwise leaves logits at model
+        # resolution (which differs per scale) to save memory -- that would
+        # make the tensors below non-broadcastable. See
+        # mmseg/models/segmentors/base.py.
+        self.module.keep_logits_at_ori_shape = True
+
     def merge_preds(self, data_samples_list: List[SampleList]) -> SampleList:
         """Merge predictions of enhanced data to one prediction.
 

@@ -9,7 +9,7 @@ from torch import Tensor
 from mmseg.structures import SegDataSample
 from mmseg.utils import (ForwardResults, OptConfigType, OptMultiConfig,
                          OptSampleList, SampleList)
-from ..utils import resize
+from ..utils import resize, resize_and_argmax
 
 
 class BaseSegmentor(BaseModel, metaclass=ABCMeta):
@@ -174,22 +174,38 @@ class BaseSegmentor(BaseModel, metaclass=ABCMeta):
                     else:
                         i_seg_logits = i_seg_logits.flip(dims=(2, ))
 
-                # Collapse channels before upsampling to ori_shape to avoid
-                # allocating a ~C × H × W float32 buffer (e.g. 116ch × 4032×
-                # 3024 ≈ 5 GiB).  argmax/sigmoid produces a 1-channel tensor
-                # that is then cheaply upsampled with nearest-neighbour.
+                # Upsample logits to ori_shape and take the argmax there --
+                # this is upstream's semantics, and it matters: bilinear
+                # interpolation of per-class logits lets a class win a
+                # high-resolution pixel through smooth blending near object
+                # boundaries. Collapsing to labels first and upsampling with
+                # nearest-neighbour cannot do that, and systematically costs
+                # boundary IoU on small targets such as disease lesions.
+                #
+                # Done in channel chunks so the full C x H x W float32 buffer
+                # (116ch x 4032 x 3024 ~ 5.3 GiB on PlantSeg's largest images)
+                # is never materialised. bilinear resize is independent per
+                # channel and max is associative, so a running argmax over
+                # chunks is bit-equivalent to resizing everything at once.
                 if C > 1:
-                    i_seg_pred = i_seg_logits.argmax(
-                        dim=1, keepdim=True).float()  # (1,1,h,w)
-                    i_seg_pred = resize(
-                        i_seg_pred,
+                    i_seg_pred = resize_and_argmax(
+                        i_seg_logits,
                         size=img_meta['ori_shape'],
-                        mode='nearest',
-                        align_corners=None,
-                        warning=False).squeeze(0).long()  # (1,H,W)
-                    # Keep a down-scaled copy of logits for metrics that need
-                    # them; we do NOT upsample all 116 channels to ori_shape.
-                    i_seg_logits = i_seg_logits.squeeze(0)  # (C,h,w)
+                        align_corners=self.align_corners)
+                    # IoUMetric reads pred_sem_seg only (see
+                    # mmseg/evaluation/metrics/iou_metric.py), so the logits
+                    # are kept at model resolution to bound memory. TTA does
+                    # need them at ori_shape to average across scales --
+                    # SegTTAModel sets keep_logits_at_ori_shape for that.
+                    if getattr(self, 'keep_logits_at_ori_shape', False):
+                        i_seg_logits = resize(
+                            i_seg_logits,
+                            size=img_meta['ori_shape'],
+                            mode='bilinear',
+                            align_corners=self.align_corners,
+                            warning=False).squeeze(0)
+                    else:
+                        i_seg_logits = i_seg_logits.squeeze(0)
                 else:
                     i_seg_logits = resize(
                         i_seg_logits,

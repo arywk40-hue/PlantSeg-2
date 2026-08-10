@@ -15,7 +15,7 @@ from .shape_convert import (nchw2nlc2nchw, nchw_to_nlc, nlc2nchw2nlc,
 from .up_conv_block import UpConvBlock
 
 # isort: off
-from .wrappers import Upsample, resize
+from .wrappers import Upsample, resize, resize_and_argmax
 from .san_layers import MLP, LayerNorm2d, cross_attn_layer
 
 __all__ = [
@@ -24,5 +24,6 @@ __all__ = [
     'nchw_to_nlc', 'nlc_to_nchw', 'nchw2nlc2nchw', 'nlc2nchw2nlc', 'Encoding',
     'Upsample', 'resize', 'DAPPM', 'PAPPM', 'BasicBlock', 'Bottleneck',
     'cross_attn_layer', 'LayerNorm2d', 'MLP',
-    'get_uncertain_point_coords_with_randomness', 'point_sample'
+    'get_uncertain_point_coords_with_randomness', 'point_sample',
+    'resize_and_argmax'
 ]
