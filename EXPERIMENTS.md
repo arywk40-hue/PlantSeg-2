@@ -84,8 +84,8 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 | EXP-001 | segnext_mscan-l_paper-sgd_40k_...512x512            | val   | 31.18 | 42.87 | best ckpt @38k of 40k |
 | EXP-001 | same checkpoint, corrected eval                     | TEST  | 33.50 | 46.60 | vs paper's 44.52 / 59.95 |
 | EXP-002 | EXP-001 + `--amp`                                   | val   |      |      | dropped -- EXP-001 abandoned, no baseline to control against |
-| EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   | 43.96* | 56.70* | *MID-RUN @~20k of 40k -- not a final result |
-| EXP-003 | same mid-run checkpoint, corrected eval              | TEST  | 42.99* | 56.77* | *MID-RUN. vs paper 44.52/59.95 -> gap -1.53 |
+| EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   | 46.47 | 60.00 | best ckpt @26k of 40k |
+| EXP-003 | best ckpt @26k, corrected eval                       | TEST  | **45.04** | **60.06** | vs paper 44.52/59.95 -> +0.52 / +0.11 |
 | EXP-004 | EXP-003, lr in {3e-5, 6e-5, 1.2e-4, 2.4e-4}         | val   |      |      | sweep |
 | EXP-005 | EXP-003 + CE+Dice                                   | val   |      |      | justify with `tools/class_stats.py` on the FULL data first |
 | EXP-006 | segnext_mscan-l_tuned_40k_...640x640                | val   |      |      | CONFOUNDED: crop + loss |
@@ -254,6 +254,69 @@ as a rough offset rather than a constant. It sets the val-side targets:
 Note mAcc is proportionally further from the paper than mIoU (56.77/59.95 =
 94.7% versus 42.99/44.52 = 96.6%), i.e. some residual under-commitment on
 disease pixels remains even after the optimizer fix.
+
+## EXP-003 result: Table 3 reproduces, but not from the paper's stated recipe
+
+| Source                              | mIoU      | mAcc      |
+|-------------------------------------|-----------|-----------|
+| Paper, Table 3 (SegNeXt / MSCAN-L)  | 44.52     | 59.95     |
+| EXP-001, paper's STATED recipe      | 33.50     | 46.60     |
+| EXP-003, repo's SHIPPED recipe      | **45.04** | **60.06** |
+
+All three on the test split (2,295 images), same `IoUMetric`, 116 classes,
+corrected `resize_and_argmax` evaluation.
+
+**The finding.** The paper states SGD @ 1e-3 with no parameter groups. That
+gives 33.50 -- eleven points short of its own Table 3. The repo's shipped
+`segnext_mscan-l_1xb16-adamw-40k_plantseg115-512x512.py` uses AdamW @ 6e-5 with
+`head: lr_mult=10.` and a 1500-iteration warmup, and that reproduces Table 3.
+The published text and the published code describe different experiments; only
+the code reproduces. This is independent of any margin claim.
+
+**On the +0.52 margin -- NOT established.** Three reasons:
+
+1. The plateau pass-to-pass spread is 0.42 mIoU (measured, see trajectory
+   table). +0.52 is ~1.2 sigma. Suggestive, not resolved.
+2. The checkpoint was chosen by `save_best`, i.e. the maximum of 13 val passes.
+   Max-of-N on a noisy metric is upward-biased by roughly the noise scale.
+3. Single seed.
+
+**mAcc +0.11 is a tie, not a win.** Do not report it as an improvement.
+
+**One factor in our favour, worth stating when reporting.** We train on `train`
+only (7,916 images). The paper's stock config validates on test, implying it
+trained on train+val (9,163). So 45.04 was obtained with ~14% less training
+data than the baseline it is compared against.
+
+### val -> test offset, two paired observations
+
+| Checkpoint        | val   | test  | test - val |
+|-------------------|-------|-------|------------|
+| EXP-003 @~20k     | 43.96 | 42.99 | -0.97      |
+| EXP-003 best @26k | 46.47 | 45.04 | -1.43      |
+
+Consistent in direction; mean **-1.2**. Part of this is genuine split
+difference and part is `save_best` selection bias on val, which the test split
+does not share.
+
+### Overfitting onset -- why EXP-008 (80k) was cancelled
+
+At iteration 37,400: `loss: 0.1324`, `decode.acc_seg: 91-95%` on train, while
+val mIoU had drifted down across three consecutive passes and LR was at 4.05e-6
+(6.8% of base). The best val checkpoint came at 26,000 -- **not** at the
+schedule end, unlike EXP-001, which peaked at 38,000 of 40,000.
+
+That reverses the evidence EXP-008 was built on. EXP-003 is not
+iteration-starved; it is saturating on data variety at ~69 epochs. Running 80k
+on the same augmentation would deepen memorisation rather than raise val, so
+EXP-008 is not run.
+
+This vindicates the structure of the original 160k config, which paired the
+long schedule *with* stronger augmentation. The augmentation is what makes
+additional iterations useful. Its specific choices remain doubtful --
+`hue_delta=25` and `saturation_range=(0.5, 1.7)` perturb the channels that
+carry the diagnostic signal for chlorosis, necrosis and rust -- but geometric
+augmentation and milder photometric jitter are the right lever from here.
 
 ## Review of the pre-existing 160k config (NOT RUN)
 
