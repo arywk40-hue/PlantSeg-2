@@ -197,6 +197,9 @@ the running best.
 | 16000 | 40.23    | **-2.39 vs iter 12000** |
 | 18000 | <42.62   | no improvement |
 | 20000 | 43.96    | |
+| 22000 | <43.96   | no improvement |
+| 24000 | <43.96   | no improvement |
+| 26000 | **46.47**| +2.51 over iter 20000 |
 
 **Measured noise floor: +/-2.4 mIoU between adjacent val passes on a single
 run.** The 12000 -> 16000 drop of 2.39 points is not seed variance or split
@@ -207,8 +210,12 @@ five times the target.
 Two consequences:
 
 1. **Read progress off best-so-far, not adjacent passes.** 12000 -> 20000 is
-   **+1.34 over 8000 iterations**, not the +3.73 that 16000 -> 20000 suggests.
-   The deceleration is steeper than the raw sequence implies.
+   +1.34 over 8000 iterations, not the +3.73 that 16000 -> 20000 suggests.
+   But do not over-correct into a plateau story either: 20000 -> 26000 then
+   gained **+2.51 in 6000 iterations**, faster than the preceding stretch. The
+   curve is noisy and non-monotonic in both directions, and the iter-16000 dip
+   was noise rather than saturation. No trend claim from fewer than ~3 val
+   passes is worth making on this run.
 2. **`save_best='mIoU'` is a max over ~20 noisy draws, so it selects the upper
    tail.** The reported val best is biased high by roughly the noise scale.
    Part of the -0.97 val-to-test offset recorded above is therefore selection
