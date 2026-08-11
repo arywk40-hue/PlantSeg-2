@@ -55,7 +55,8 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 | Exp     | Config                                              | Split | mIoU | mAcc | Notes |
 |---------|-----------------------------------------------------|-------|------|------|-------|
 | EXP-000 | smoke (200 iter)                                    | val   |      |      | pipeline check only |
-| EXP-001 | segnext_mscan-l_paper-sgd_40k_...512x512            | val   | 11.34 @8k | | STOPPED at 8k of 40k. See below. |
+| EXP-001 | segnext_mscan-l_paper-sgd_40k_...512x512            | val   | 31.18 | 42.87 | best ckpt @38k of 40k |
+| EXP-001 | same checkpoint, corrected eval                     | TEST  | 33.50 | 46.60 | vs paper's 44.52 / 59.95 |
 | EXP-002 | EXP-001 + `--amp`                                   | val   |      |      | dropped -- EXP-001 abandoned, no baseline to control against |
 | EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   |      |      | AdamW + head lr_mult=10 + warmup |
 | EXP-004 | EXP-003, lr in {3e-5, 6e-5, 1.2e-4, 2.4e-4}         | val   |      |      | sweep |
@@ -67,42 +68,51 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 
 ### EXP-001: the paper's stated recipe does not reproduce its own number
 
-Stopped at iteration 8,000 of 40,000. Val curve (`logs/exp001_val_curve.txt`):
+Ran the full 40,000 iterations. Best checkpoint at iteration **38,000**, i.e.
+the model was still improving when the schedule ended -- evidence that 40k is
+short for 116 classes on 7,916 images.
 
-| Iter | mIoU  | mPrecision | mRecall |
-|------|-------|-----------|---------|
-| 2000 | 1.09  | 24.97     | 1.55    |
-| 8000 | 11.34 | 41.00     | 17.04   |
+| Iter  | mIoU  | mPrecision | mRecall |
+|-------|-------|-----------|---------|
+| 2000  | 1.09  | 24.97     | 1.55    |
+| 8000  | 11.34 | 41.00     | 17.04   |
+| 38000 | 31.18 | 53.11     | 42.87   |
 
-Two things this establishes:
+**Head-to-head with the paper.** The stock `plantseg115.py` points
+`val_dataloader` at `images/test`, so the paper's Table 3 numbers are test-split
+numbers. Re-scoring the best checkpoint on test under the corrected evaluation
+code gives the like-for-like comparison:
 
-1. **Precision (41) far exceeds recall (17).** The model is usually right when
-   it commits to a disease class but rarely commits. That is the signature of
-   an under-trained head on an ~80%-background dataset, not a data or label
-   bug -- a genuine pipeline fault drives precision to ~0 as well.
-2. **Background inflates the headline.** mIoU averages 116 classes including
-   background, whose IoU is ~80. At mIoU 11.34 the mean over the 115 *disease*
-   classes is only ~10.7. Reaching the paper's 44.52 requires ~44 average
-   disease IoU, i.e. roughly 4x.
+| Source                        | mIoU  | mAcc  |
+|-------------------------------|-------|-------|
+| Paper, Table 3 (SegNeXt / MSCAN-L) | 44.52 | 59.95 |
+| EXP-001, test split           | **33.50** | **46.60** |
+| gap                           | -11.02 | -13.35 |
 
-Probable cause: the paper specifies "a learning rate of 0.001" with no mention
-of parameter groups, so this config applies it uniformly. The repo's own
-`segnext_mscan-l_1xb16-adamw-40k_plantseg115-512x512.py` gives the randomly
-initialised 116-class head **10x** the base LR plus a 1,500-iteration warmup,
-and uses AdamW @ 6e-5 rather than SGD. The published text and the published
-code describe different experiments; only the code plausibly produced 44.52.
+Roughly 1 point of that gap is self-imposed: we train on `train` only (7,916)
+while the paper most likely used train+val (9,163). The remaining ~10 points
+are not accounted for by the dataset, the class count, the evaluation code, or
+the schedule length alone.
 
-Caveat on these numbers: EXP-001 ran before the `postprocess_result` fix
-(commit 5152e61), so its validation used nearest-neighbour upsampling of an
-argmaxed label map. That costs some boundary IoU. Re-scoring the saved
-checkpoint under the corrected code quantifies it:
+**What the recipe is missing.** The paper specifies "a learning rate of 0.001"
+with no mention of parameter groups, so this config applies it uniformly to
+both the ImageNet-pretrained backbone and the randomly initialised 116-class
+head. The repo's own `segnext_mscan-l_1xb16-adamw-40k_plantseg115-512x512.py`
+instead uses AdamW @ 6e-5, gives the head **10x** the base LR, and warms up over
+1,500 iterations. The published text and the published code describe different
+experiments, and only the code is a plausible source of 44.52. This is the
+second internal inconsistency in the paper, after the 44.52 vs 53.89 conflict
+between Table 3 and the body text.
 
-    python3 tools/test.py \
-      configs/segnext/segnext_mscan-l_paper-sgd_40k_plantseg115-512x512.py \
-      work_dirs/exp001_baseline_sgd/best_mIoU_iter_8000.pth \
-      --work-dir work_dirs/exp001_recheck
+The early-iteration profile supports the diagnosis rather than a data fault:
+precision (41) far exceeded recall (17) at iteration 8,000, which is an
+under-trained head on an ~81%-background dataset. A genuine label or pipeline
+bug drives precision to ~0 as well.
 
-Expect a point or two, not ten. It does not change the conclusion.
+Both EXP-001 rows above were produced under the corrected `postprocess_result`
+(commit 5152e61) for the test row, and under the older nearest-neighbour path
+for the in-training val row. Do not read the val-to-test difference as an
+effect of either change alone -- the split and the evaluation code both differ.
 
 ## Reproduction gate
 
