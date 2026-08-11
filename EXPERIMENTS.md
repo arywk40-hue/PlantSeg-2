@@ -83,6 +83,7 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 | EXP-001 | same checkpoint, corrected eval                     | TEST  | 33.50 | 46.60 | vs paper's 44.52 / 59.95 |
 | EXP-002 | EXP-001 + `--amp`                                   | val   |      |      | dropped -- EXP-001 abandoned, no baseline to control against |
 | EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   | 43.96* | 56.70* | *MID-RUN @~20k of 40k -- not a final result |
+| EXP-003 | same mid-run checkpoint, corrected eval              | TEST  | 42.99* | 56.77* | *MID-RUN. vs paper 44.52/59.95 -> gap -1.53 |
 | EXP-004 | EXP-003, lr in {3e-5, 6e-5, 1.2e-4, 2.4e-4}         | val   |      |      | sweep |
 | EXP-005 | EXP-003 + CE+Dice                                   | val   |      |      | justify with `tools/class_stats.py` on the FULL data first |
 | EXP-006 | segnext_mscan-l_tuned_40k_...640x640                | val   |      |      | CONFOUNDED: crop + loss |
@@ -178,6 +179,34 @@ not solely of the 80.21% background prior. The class-imbalance figures are
 unchanged and still real, but they are now weaker evidence for EXP-005 than
 they appeared. Demote CE+Dice below the 160k schedule in priority.
 
+### val -> test calibration (supersedes the EXP-001 estimate)
+
+EXP-003's mid-run checkpoint was scored on both splits under the same corrected
+evaluation code, giving the first clean measurement of the split offset:
+
+| Checkpoint            | val mIoU | test mIoU | test - val |
+|-----------------------|----------|-----------|------------|
+| EXP-001 best @38k     | 31.18    | 33.50     | **+2.32**  |
+| EXP-003 mid-run @~20k | 43.96    | 42.99     | **-0.97**  |
+
+The sign flips, and the reason is a confound in the first row, not instability
+in the dataset: EXP-001's val number was produced under the old
+argmax-then-nearest-upsample path, while its test number used the corrected
+`resize_and_argmax`. That +2.32 is mostly the evaluation fix. Only the EXP-003
+row compares like with like.
+
+**Working figure: test ~= val - 1.0 mIoU.** One paired observation, so treat it
+as a rough offset rather than a constant. It sets the val-side targets:
+
+| Goal (test)          | Required val mIoU |
+|----------------------|-------------------|
+| match paper (44.52)  | ~45.5             |
+| cross 45             | ~46.0             |
+
+Note mAcc is proportionally further from the paper than mIoU (56.77/59.95 =
+94.7% versus 42.99/44.52 = 96.6%), i.e. some residual under-commitment on
+disease pixels remains even after the optimizer fix.
+
 ## Review of the pre-existing 160k config (NOT RUN)
 
 `configs/segnext/segnext_mscan-l_160k_diceCE_aug_plantseg115-512x512.py` was
@@ -236,14 +265,19 @@ and every read is recorded here:
 
 1. **EXP-001 best checkpoint** -- 33.50 / 46.60. Diagnostic on a failed
    reproduction, taken before any tuning decision depended on it.
-2. **EXP-003 best checkpoint** -- the reproduction claim. A test read is
+2. **EXP-003 mid-run checkpoint** -- 42.99 / 56.77. Taken at ~20k of 40k to
+   calibrate the val-to-test offset, which the EXP-001 pair could not give
+   because the two splits were scored under different evaluation code.
+3. **EXP-003 best checkpoint** -- the reproduction claim. A test read is
    unavoidable because 44.52 is a test number; val cannot answer whether the
    paper reproduces.
-3. **FINAL** -- the winning config after all val-side tuning.
+4. **FINAL** -- the winning config after all val-side tuning.
 
-No hyperparameter, schedule, or loss decision may be made on the basis of (1)
-or (2). All model selection stays on val. Anything else is test-set fitting,
-and it would invalidate the comparison the whole exercise exists to make.
+No hyperparameter, schedule, or loss decision may be made on the basis of (1),
+(2) or (3). All model selection stays on val; read (2) is used only to convert
+val targets into test-equivalent ones, never to choose between configs.
+Anything else is test-set fitting, and it would invalidate the comparison the
+whole exercise exists to make.
 
 ## Reproduction gate
 
