@@ -40,8 +40,10 @@ Label ids run 0..115, confirming `num_classes=116`. An earlier partial download
    once, at the end, via `tools/test.py`.
 2. One variable per experiment. EXP-002 exists solely to prove AMP is
    score-neutral so EXP-003's delta is attributable to the optimizer.
-3. Report mean +/- std over 3 seeds for any headline claim. Single-seed
-   segmentation runs vary by roughly +/-0.5 mIoU.
+3. Report mean +/- std over 3 seeds for any headline claim. The single-run
+   noise is measured, not assumed: EXP-003 dropped 2.39 mIoU between adjacent
+   val passes on one run (see its trajectory table). Treat any difference under
+   ~2.5 mIoU from a single run as unresolved.
 4. Rare-class noise floor: measured on the full data with `tools/class_stats.py`
    (`logs/class_stats.txt`). Every class has val support -- no class scores a
    forced zero. 2 classes have a single val image, 7 have <=2, 33 have <=5.
@@ -178,6 +180,45 @@ The under-commitment on disease pixels was a symptom of the under-trained head,
 not solely of the 80.21% background prior. The class-imbalance figures are
 unchanged and still real, but they are now weaker evidence for EXP-005 than
 they appeared. Demote CE+Dice below the 160k schedule in priority.
+
+### EXP-003 val trajectory (val_interval=2000, 0.587 s/iter)
+
+Only improvements print a checkpoint line, so unlisted passes failed to beat
+the running best.
+
+| Iter  | val mIoU | Note |
+|-------|----------|------|
+| 2000  | 18.54    | |
+| 6000  | 34.50    | |
+| 8000  | 37.64    | |
+| 10000 | <37.64   | no improvement |
+| 12000 | 42.62    | |
+| 14000 | <42.62   | no improvement |
+| 16000 | 40.23    | **-2.39 vs iter 12000** |
+| 18000 | <42.62   | no improvement |
+| 20000 | 43.96    | |
+
+**Measured noise floor: +/-2.4 mIoU between adjacent val passes on a single
+run.** The 12000 -> 16000 drop of 2.39 points is not seed variance or split
+variance -- it is the same run, the same data, 4000 iterations apart. The
+margin required to beat the paper is +0.48. The measurement noise is roughly
+five times the target.
+
+Two consequences:
+
+1. **Read progress off best-so-far, not adjacent passes.** 12000 -> 20000 is
+   **+1.34 over 8000 iterations**, not the +3.73 that 16000 -> 20000 suggests.
+   The deceleration is steeper than the raw sequence implies.
+2. **`save_best='mIoU'` is a max over ~20 noisy draws, so it selects the upper
+   tail.** The reported val best is biased high by roughly the noise scale.
+   Part of the -0.97 val-to-test offset recorded above is therefore selection
+   bias rather than a genuine split difference, which means the val -> test
+   figure should be treated as an upper bound on val, not a property of the
+   splits. The test read remains the honest number.
+
+This is also the strongest argument yet for EXP-007. A single run landing at
+45.1 test is indistinguishable from one landing at 44.0; only the seed spread
+separates them.
 
 ### val -> test calibration (supersedes the EXP-001 estimate)
 
