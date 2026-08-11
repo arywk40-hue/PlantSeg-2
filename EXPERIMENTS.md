@@ -82,7 +82,7 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 | EXP-001 | segnext_mscan-l_paper-sgd_40k_...512x512            | val   | 31.18 | 42.87 | best ckpt @38k of 40k |
 | EXP-001 | same checkpoint, corrected eval                     | TEST  | 33.50 | 46.60 | vs paper's 44.52 / 59.95 |
 | EXP-002 | EXP-001 + `--amp`                                   | val   |      |      | dropped -- EXP-001 abandoned, no baseline to control against |
-| EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   |      |      | AdamW + head lr_mult=10 + warmup |
+| EXP-003 | segnext_mscan-l_tuned-adamw_40k_...512x512          | val   | 43.96* | 56.70* | *MID-RUN @~20k of 40k -- not a final result |
 | EXP-004 | EXP-003, lr in {3e-5, 6e-5, 1.2e-4, 2.4e-4}         | val   |      |      | sweep |
 | EXP-005 | EXP-003 + CE+Dice                                   | val   |      |      | justify with `tools/class_stats.py` on the FULL data first |
 | EXP-006 | segnext_mscan-l_tuned_40k_...640x640                | val   |      |      | CONFOUNDED: crop + loss |
@@ -137,6 +137,61 @@ Both EXP-001 rows above were produced under the corrected `postprocess_result`
 (commit 5152e61) for the test row, and under the older nearest-neighbour path
 for the in-training val row. Do not read the val-to-test difference as an
 effect of either change alone -- the split and the evaluation code both differ.
+
+### EXP-003: the optimizer was the gap (in progress)
+
+One variable changed vs EXP-001: the optimizer block. AdamW @ 6e-5 with
+`head: lr_mult=10.` and a 1500-iteration linear warmup, taken from the repo's
+own `segnext_mscan-l_1xb16-adamw-40k_plantseg115-512x512.py`, replacing the
+paper's stated uniform SGD @ 1e-3.
+
+| Iter    | EXP-001 (paper SGD) | EXP-003 (AdamW, head x10) |
+|---------|---------------------|---------------------------|
+| 2000    | 1.09                | 18.54                     |
+| ~16000  | --                  | 40.23                     |
+| ~20000  | --                  | **43.96**                 |
+| 38000   | 31.18 (best)        | --                        |
+
+At the halfway point EXP-003 exceeds EXP-001's *final* best by 12.8 mIoU. The
+diagnosis in the EXP-001 write-up -- that a randomly initialised 116-class head
+cannot train at the backbone's learning rate -- is confirmed. The paper's text
+and the paper's code describe different experiments; only the code reproduces.
+
+**43.96 is a val number and is NOT comparable to the paper's 44.52**, which is
+a test-split figure. Do not report the two side by side. EXP-001 moved +2.3
+from val to test, but that single observation came from a weak checkpoint and
+also spans an evaluation-code change, so it does not transfer as an offset.
+
+**Revision to the EXP-005 rationale.** The precision-over-recall gap that
+motivated adding a Dice term has largely closed on its own under the corrected
+optimizer:
+
+| Checkpoint        | mPrecision | mRecall | gap  |
+|-------------------|-----------|---------|------|
+| EXP-001 final     | 53.11     | 42.87   | 10.2 |
+| EXP-003 @2k       | 52.06     | 26.48   | 25.6 |
+| EXP-003 @~20k     | 64.02     | 56.70   | 7.3  |
+
+The under-commitment on disease pixels was a symptom of the under-trained head,
+not solely of the 80.21% background prior. The class-imbalance figures are
+unchanged and still real, but they are now weaker evidence for EXP-005 than
+they appeared. Demote CE+Dice below the 160k schedule in priority.
+
+## Test-split budget (DISCLOSE WHEN REPORTING)
+
+The ground rules say test is touched once. It will in fact be read three times,
+and every read is recorded here:
+
+1. **EXP-001 best checkpoint** -- 33.50 / 46.60. Diagnostic on a failed
+   reproduction, taken before any tuning decision depended on it.
+2. **EXP-003 best checkpoint** -- the reproduction claim. A test read is
+   unavoidable because 44.52 is a test number; val cannot answer whether the
+   paper reproduces.
+3. **FINAL** -- the winning config after all val-side tuning.
+
+No hyperparameter, schedule, or loss decision may be made on the basis of (1)
+or (2). All model selection stays on val. Anything else is test-set fitting,
+and it would invalidate the comparison the whole exercise exists to make.
 
 ## Reproduction gate
 
