@@ -42,11 +42,35 @@ Label ids run 0..115, confirming `num_classes=116`. An earlier partial download
    score-neutral so EXP-003's delta is attributable to the optimizer.
 3. Report mean +/- std over 3 seeds for any headline claim. Single-seed
    segmentation runs vary by roughly +/-0.5 mIoU.
-4. Rare-class noise floor: mIoU averages 116 classes equally, so a class with a
-   handful of val images can swing the mean on its own. **Recompute on the full
-   dataset** with `tools/class_stats.py` before quoting a threshold -- the
-   previous "19 classes with <=2 val images" figure was measured on the partial
-   download and no longer applies.
+4. Rare-class noise floor: measured on the full data with `tools/class_stats.py`
+   (`logs/class_stats.txt`). Every class has val support -- no class scores a
+   forced zero. 2 classes have a single val image, 7 have <=2, 33 have <=5.
+
+   The tool prints a "worst-case mIoU swing" for each tier. Read it as an
+   **upper bound, not an expected variance**: the <=2 tier's 6.03 points
+   assumes all 7 classes simultaneously flip a full 100 IoU points, which does
+   not happen in practice. It bounds how much the thin tail *could* move the
+   mean, nothing more. The usable significance threshold is the empirical
+   seed-to-seed spread from EXP-007, not this number.
+
+## Class imbalance (full data, train split)
+
+| Quantity | Value |
+|----------|-------|
+| background (id 0) share of pixels | 80.21% |
+| all 115 disease classes combined | 19.79% |
+| commonest disease class (id 90) | 1.160% of pixels |
+| rarest disease class (id 42) | 0.00107% of pixels |
+| commonest / rarest disease | 1,087x |
+| background / rarest disease | 75,183x |
+
+This is the evidence for EXP-005. Cross-entropy averages over pixels, so the
+objective is ~80% background by construction, while mIoU averages over classes
+and weights id 42 exactly as heavily as id 90. Both experiments so far show the
+predicted symptom -- precision far above recall (EXP-001 final: 53.11 vs 42.87;
+EXP-003 @2k: 52.06 vs 26.48), i.e. the model under-commits on disease pixels.
+A region-based term (Dice) optimises overlap per class rather than per pixel
+and targets exactly that asymmetry.
 
 ## Results
 
