@@ -90,7 +90,8 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 | EXP-005 | EXP-003 + CE+Dice                                   | val   |      |      | justify with `tools/class_stats.py` on the FULL data first |
 | EXP-006 | segnext_mscan-l_tuned_40k_...640x640                | val   |      |      | CONFOUNDED: crop + loss |
 | EXP-007 | winner, seeds 0/1/2                                 | val   |      |      | report mean +/- std |
-| EXP-008 | segnext_mscan-l_tuned-adamw_80k_...512x512          | val   |      |      | EXP-003 + 80k schedule, ONE variable |
+| EXP-008 | segnext_mscan-l_tuned-adamw_80k_...512x512          | --    | --   | --   | CANCELLED -- EXP-003 overfits by 26k, not iteration-starved |
+| EXP-009 | segnext_mscan-l_tuned-adamw-geoaug_40k_...512x512   | val   |      |      | EXP-003 + rotation & vflip, ONE variable |
 | FINAL   | winner, best-on-val ckpt                            | TEST  |      |      | run ONCE |
 | FINAL+  | winner + TTA                                        | TEST  |      |      | disclose separately |
 
@@ -317,6 +318,49 @@ additional iterations useful. Its specific choices remain doubtful --
 `hue_delta=25` and `saturation_range=(0.5, 1.7)` perturb the channels that
 carry the diagnostic signal for chlorosis, necrosis and rust -- but geometric
 augmentation and milder photometric jitter are the right lever from here.
+
+### EXP-009: geometric augmentation, isolated
+
+The counterpart to the cancelled EXP-008. Same diagnosis, opposite remedy: if
+the model is memorising rather than under-training, add view variety rather
+than iterations.
+
+Changes, all inside the augmentation block:
+
+| Transform | Change |
+|-----------|--------|
+| `RandomRotate` | NEW -- `prob=0.5, degree=30, seg_pad_val=255` |
+| `RandomFlip` (vertical) | NEW -- `prob=0.5` |
+| `PhotoMetricDistortion` | UNCHANGED at stock defaults |
+
+Three implementation points that are deliberate rather than incidental:
+
+* **Rotation goes before `RandomCrop`**, so it acts on the resized image and
+  the crop can land anywhere inside it. Rotating after the crop would force
+  ignore-padding into every 512x512 sample.
+* **`seg_pad_val=255` is stated explicitly**, though it is also the default.
+  The regions rotated in from outside the image must be IGNORE, not class 0.
+  Background is already 80.21% of pixels; labelling rotation padding as
+  background would inflate that and teach the model that dark corners are
+  background.
+* **30 degrees, not 90 or 180.** With `auto_bound=False` the padded fraction
+  grows with the angle, and padded pixels produce no gradient. 30 degrees buys
+  most of the invariance for a small fraction of the waste. Larger angles are a
+  separate experiment.
+
+**Colour augmentation is excluded on purpose.** Disease classes here are
+distinguished largely by colour -- chlorosis by yellowing, necrosis by
+browning, the rusts by hue. Strong hue/saturation jitter perturbs the
+diagnostic signal itself and can map two distinct classes onto the same
+appearance. Rotation and flipping cannot: a lesion is the same lesion upside
+down. This is why the pre-existing 160k config's `hue_delta=25` and
+`saturation_range=(0.5, 1.7)` are not adopted, even though its instinct to pair
+a longer schedule with stronger augmentation was correct.
+
+If EXP-009 raises val and closes the train/val gap, a longer schedule becomes
+justified *in combination with it* -- which is what the 160k config was
+reaching for. Colour augmentation, if tested at all, should be a third
+experiment at much milder settings.
 
 ## Review of the pre-existing 160k config (NOT RUN)
 

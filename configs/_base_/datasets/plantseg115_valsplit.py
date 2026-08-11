@@ -2,8 +2,8 @@
 #
 # The stock configs/_base_/datasets/plantseg115.py points `val_dataloader` at
 # images/test, so model selection and hyperparameter tuning happen on the test
-# set. This variant validates on the untouched `val` split (846 images) and
-# reserves `test` (1561 images) for a single final measurement.
+# set. This variant validates on the untouched `val` split (1,247 images) and
+# reserves `test` (2,295 images) for a single final measurement.
 dataset_type = 'PlantSeg115Dataset'
 data_root = 'data/plantseg115'
 crop_size = (512, 512)
