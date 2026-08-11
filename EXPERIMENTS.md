@@ -87,6 +87,7 @@ Fill in as runs complete. mIoU/mAcc on VAL unless the row says TEST.
 | EXP-005 | EXP-003 + CE+Dice                                   | val   |      |      | justify with `tools/class_stats.py` on the FULL data first |
 | EXP-006 | segnext_mscan-l_tuned_40k_...640x640                | val   |      |      | CONFOUNDED: crop + loss |
 | EXP-007 | winner, seeds 0/1/2                                 | val   |      |      | report mean +/- std |
+| EXP-008 | segnext_mscan-l_tuned-adamw_80k_...512x512          | val   |      |      | EXP-003 + 80k schedule, ONE variable |
 | FINAL   | winner, best-on-val ckpt                            | TEST  |      |      | run ONCE |
 | FINAL+  | winner + TTA                                        | TEST  |      |      | disclose separately |
 
@@ -176,6 +177,57 @@ The under-commitment on disease pixels was a symptom of the under-trained head,
 not solely of the 80.21% background prior. The class-imbalance figures are
 unchanged and still real, but they are now weaker evidence for EXP-005 than
 they appeared. Demote CE+Dice below the 160k schedule in priority.
+
+## Review of the pre-existing 160k config (NOT RUN)
+
+`configs/segnext/segnext_mscan-l_160k_diceCE_aug_plantseg115-512x512.py` was
+written before the EXP-001/003 diagnosis. It is not run as-is. Its PolyLR
+observation is correct and is carried into EXP-008; four defects are not.
+
+| # | Defect | Consequence |
+|---|--------|-------------|
+| 1 | Inherits `plantseg115.py`, whose `val_dataloader` points at `images/test` (line 64) | All 16 validation passes read the test split -- leakage |
+| 2 | No `save_best`; inherits `interval=10000` from `schedule_40k.py:22` | EXP-001 peaked at 38k/40k. A 160k run would keep only the final checkpoint |
+| 3 | `DiceLoss` entry omits `use_sigmoid=False`; the class defaults to `True` (`dice_loss.py:98`) | Sigmoid applied to a 116-way softmax problem. CE and Dice optimise different output parameterisations simultaneously |
+| 4 | `load_from` a converged 40k checkpoint, then a fresh 160k poly schedule | Re-warms a converged model: a two-stage ~200k schedule, not comparable to a 160k run |
+
+Two further notes, non-blocking:
+
+* `accumulative_counts=2` at `batch_size=8` restores effective batch 16 for
+  gradients but not for BatchNorm -- MSCAN uses BN, whose statistics are
+  computed per micro-batch of 8. Not equivalent to EXP-003's true batch 16.
+* `ignore_index=255` in the Dice entry is a no-op. `dice_loss.py:71` drops
+  *channel* 255, and `torch.arange(116) != 255` is all-True.
+  `_expand_onehot_labels_dice` (line 25) clamps label 255 to 116 and slices it
+  off, so ignore/padding pixels become all-zero targets that still contribute
+  to the denominator via `input*input`. With `seg_pad_val=255` padding every
+  image, this inflates the loss on pixels intended to be skipped.
+
+The augmentation block is the part to be most sceptical of. `hue_delta=25` and
+`saturation_range=(0.5, 1.7)` perturb exactly the channels that carry the
+diagnostic signal on this dataset -- chlorosis, necrosis and rust are
+identified by hue and saturation. This is a hypothesis to test on its own, not
+to bundle.
+
+Net: the config changes five things at once (schedule, loss, augmentation,
+grad clipping, batch/accumulation). EXP-008 takes the one with direct
+supporting evidence.
+
+### EXP-008: schedule length, isolated
+
+Two independent observations motivate this, and neither is a guess:
+
+* EXP-001's best checkpoint was iteration **38,000 of 40,000**.
+* EXP-003 reached 43.96 val mIoU by ~20k of 40k and was still climbing.
+
+Neither run had plateaued at its schedule end.
+
+**80k rather than 160k.** At batch 16 over 7,916 images, 80k iterations is ~162
+epochs; 160k is ~323. Since we are deliberately *not* adding the stronger
+augmentation that would offset that (it would be a second variable), 160k
+carries real memorisation risk. 80k answers "does longer help" in ~12.5h rather
+than ~25h. If it wins, 160k is justified on evidence; if it does not, 160k was
+never going to.
 
 ## Test-split budget (DISCLOSE WHEN REPORTING)
 
